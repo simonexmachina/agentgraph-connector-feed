@@ -8,7 +8,7 @@ deletions through a separately deployed AgentGraph feed server.
 Install the connector into the same Python environment as AgentGraph:
 
 ```sh
-uv pip install agentgraph-feed-connector
+uv pip install agentgraph-connector-feed
 ```
 
 The `0.1.x` connector releases support `agentgraph-server>=0.6.1,<0.7`.

@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -8,22 +8,7 @@ resolution-markers = [
 ]
 
 [[package]]
-name = "agentgraph-connector-web"
-version = "0.5.4"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "agentgraph-server" },
-    { name = "curl-cffi" },
-    { name = "httpx" },
-    { name = "pyyaml" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/0c/a9/5f05bf46e214ff3ce84238499fe7320c49d1a3bba8bca63f7c5c7720edff/agentgraph_connector_web-0.5.4.tar.gz", hash = "sha256:7b081fea245c533d599a1b3ce734497767717b46d8b3992d7c8bcea211335b76", size = 9627, upload-time = "2026-08-28T07:26:55.708Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3d/c7/f04f82cf98a4ca2cbba15f3b29b372eac5844724ed360770495ceeabfc7b/agentgraph_connector_web-0.5.4-py3-none-any.whl", hash = "sha256:2f20ee71ceb36791c5bfdbc31cd70044ebc11c29d974fd812323f0e57be2436c", size = 11083, upload-time = "2026-08-28T07:26:54.641Z" },
-]
-
-[[package]]
-name = "agentgraph-feed-connector"
+name = "agentgraph-connector-feed"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
@@ -51,6 +36,21 @@ dev = [
     { name = "pytest", specifier = ">=8,<10" },
     { name = "pytest-asyncio", specifier = ">=0.24,<2" },
     { name = "ruff", specifier = ">=0.16,<1" },
+]
+
+[[package]]
+name = "agentgraph-connector-web"
+version = "0.5.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "agentgraph-server" },
+    { name = "curl-cffi" },
+    { name = "httpx" },
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0c/a9/5f05bf46e214ff3ce84238499fe7320c49d1a3bba8bca63f7c5c7720edff/agentgraph_connector_web-0.5.4.tar.gz", hash = "sha256:7b081fea245c533d599a1b3ce734497767717b46d8b3992d7c8bcea211335b76", size = 9627, upload-time = "2026-08-28T07:26:55.708Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3d/c7/f04f82cf98a4ca2cbba15f3b29b372eac5844724ed360770495ceeabfc7b/agentgraph_connector_web-0.5.4-py3-none-any.whl", hash = "sha256:2f20ee71ceb36791c5bfdbc31cd70044ebc11c29d974fd812323f0e57be2436c", size = 11083, upload-time = "2026-08-28T07:26:54.641Z" },
 ]
 
 [[package]]

@@ -1,5 +1,5 @@
 [project]
-name = "agentgraph-feed-connector"
+name = "agentgraph-connector-feed"
 version = "0.1.0"
 description = "Shared mutation feed connector for AgentGraph"
 readme = "README.md"
