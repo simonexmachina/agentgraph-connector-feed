@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Run tests
+        run: uv run pytest -q
+
+      - name: Type check
+        run: uv run pyright
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Build distribution
+        run: uv build --out-dir dist
+
+      - name: Test installed wheel
+        run: >-
+          uv run --isolated --with ./dist/agentgraph_feed_connector-*.whl
+          python -c "import importlib.metadata as m; assert any(ep.name == 'feed' for ep in m.entry_points(group='agentgraph.connectors'))"

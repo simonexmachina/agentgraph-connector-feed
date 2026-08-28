@@ -1,0 +1,191 @@
+from __future__ import annotations
+
+import logging
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, ClassVar, Self
+from unittest.mock import AsyncMock, patch
+from uuid import UUID, uuid4
+
+import pytest
+from agentgraph.connectors.feed import BookmarkMutation, MutationTarget
+
+from agentgraph_feed_connector import AgentGraphFeedConnector, _apply_event
+from agentgraph_feed_connector.config import (
+    FeedConfig,
+    load_feed_config,
+    save_feed_config,
+)
+
+
+class _Response:
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict[str, Any]:
+        return self._payload
+
+
+class _Client:
+    responses: ClassVar[dict[str, dict[str, Any]]] = {}
+    posts: ClassVar[list[tuple[str, dict[str, Any]]]] = []
+
+    def __init__(self, **_: Any) -> None:
+        pass
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        return None
+
+    async def get(self, url: str, **_: Any) -> _Response:
+        return _Response(self.responses[url])
+
+    async def post(self, url: str, json: dict[str, Any]) -> _Response:
+        self.posts.append((url, json))
+        return _Response({"id": 1, "duplicate": False})
+
+
+@pytest.fixture
+def config() -> FeedConfig:
+    return FeedConfig(
+        feed_url="https://feed.example.test",
+        origin_id=UUID("00000000-0000-0000-0000-000000000001"),
+    )
+
+
+def test_config_round_trip(tmp_path: Path) -> None:
+    path = tmp_path / "feed.toml"
+    config = FeedConfig.create("https://feed.example.test/")
+
+    with patch("agentgraph_feed_connector.config.feed_config_path", return_value=path):
+        save_feed_config(config)
+        loaded = load_feed_config()
+
+    assert loaded == config
+    assert loaded is not None and loaded.feed_url == "https://feed.example.test"
+
+
+@pytest.mark.asyncio
+async def test_publish_adds_stable_origin(config: FeedConfig) -> None:
+    _Client.posts = []
+    event = BookmarkMutation(
+        target=MutationTarget(
+            platform="web",
+            platform_entity_id="https://example.com",
+            entity_type="Document",
+            resource_type="document",
+            url="https://example.com",
+        ),
+        bookmarked=True,
+    )
+
+    with (
+        patch("agentgraph_feed_connector.load_feed_config", return_value=config),
+        patch("agentgraph_feed_connector.httpx.AsyncClient", _Client),
+    ):
+        await AgentGraphFeedConnector().publish_mutation(event)
+
+    assert _Client.posts[0][0] == "https://feed.example.test/events"
+    assert _Client.posts[0][1]["origin_id"] == str(config.origin_id)
+    assert _Client.posts[0][1]["kind"] == "bookmark"
+
+
+@pytest.mark.asyncio
+async def test_first_poll_starts_at_feed_tail(
+    config: FeedConfig, caplog: pytest.LogCaptureFixture
+) -> None:
+    _Client.responses = {"https://feed.example.test/events/tail": {"cursor": 42}}
+
+    caplog.set_level(logging.INFO, logger="agentgraph_feed_connector")
+    with (
+        patch("agentgraph_feed_connector.load_feed_config", return_value=config),
+        patch("agentgraph_feed_connector.httpx.AsyncClient", _Client),
+    ):
+        batch, cursor = await AgentGraphFeedConnector().poll({})
+
+    assert batch.entities == []
+    assert cursor == {"last_event_id": 42}
+    assert "Polling feed server at https://feed.example.test" in caplog.messages
+
+
+@pytest.mark.asyncio
+async def test_remote_observation_reuses_server_handler(config: FeedConfig) -> None:
+    event_id = uuid4()
+    event = {
+        "sequence": 7,
+        "event_id": str(event_id),
+        "origin_id": str(uuid4()),
+        "occurred_at": datetime.now(UTC).isoformat(),
+        "kind": "observation",
+        "target": {
+            "platform": "web",
+            "platform_entity_id": "https://example.com",
+            "entity_type": "Document",
+            "resource_type": "document",
+            "url": "https://example.com",
+        },
+        "observation_duration_ms": 3000,
+        "meta": {"source": "shared"},
+    }
+
+    with patch(
+        "agentgraph_feed_connector.record_observation",
+        new=AsyncMock(return_value={"status": "accepted"}),
+    ) as record:
+        await _apply_event(event, config)
+
+    record.assert_awaited_once_with(
+        url="https://example.com",
+        observation_duration_ms=3000,
+        observation_id=str(event_id),
+        observed=True,
+        meta={"source": "shared"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_self_observation_is_not_applied(config: FeedConfig) -> None:
+    event = {
+        "sequence": 8,
+        "event_id": str(uuid4()),
+        "origin_id": str(config.origin_id),
+        "kind": "observation",
+        "target": {"url": "https://example.com"},
+        "observation_duration_ms": 3000,
+    }
+
+    with patch(
+        "agentgraph_feed_connector.record_observation", new=AsyncMock()
+    ) as record:
+        await _apply_event(event, config)
+
+    record.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_own_bookmark_is_replayed_for_feed_order(config: FeedConfig) -> None:
+    event = {
+        "sequence": 9,
+        "event_id": str(uuid4()),
+        "origin_id": str(config.origin_id),
+        "kind": "bookmark",
+        "target": {
+            "platform": "web",
+            "platform_entity_id": "https://example.com",
+            "entity_type": "Document",
+            "url": "https://example.com",
+        },
+        "bookmarked": False,
+    }
+
+    with patch(
+        "agentgraph_feed_connector._apply_bookmark", new=AsyncMock()
+    ) as apply_bookmark:
+        await _apply_event(event, config)
+
+    apply_bookmark.assert_awaited_once()
