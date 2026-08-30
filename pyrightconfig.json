@@ -1,5 +1,5 @@
 {
-  "include": ["agentgraph_feed_connector"],
+  "include": ["agentgraph_connector_feed"],
   "exclude": [".venv"],
   "venvPath": ".",
   "venv": ".venv",

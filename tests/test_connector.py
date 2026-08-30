@@ -10,8 +10,8 @@ from uuid import UUID, uuid4
 import pytest
 from agentgraph.connectors.feed import BookmarkMutation, MutationTarget
 
-from agentgraph_feed_connector import AgentGraphFeedConnector, _apply_event
-from agentgraph_feed_connector.config import (
+from agentgraph_connector_feed import AgentGraphFeedConnector, _apply_event
+from agentgraph_connector_feed.config import (
     FeedConfig,
     load_feed_config,
     save_feed_config,
@@ -62,7 +62,7 @@ def test_config_round_trip(tmp_path: Path) -> None:
     path = tmp_path / "feed.toml"
     config = FeedConfig.create("https://feed.example.test/")
 
-    with patch("agentgraph_feed_connector.config.feed_config_path", return_value=path):
+    with patch("agentgraph_connector_feed.config.feed_config_path", return_value=path):
         save_feed_config(config)
         loaded = load_feed_config()
 
@@ -85,8 +85,8 @@ async def test_publish_adds_stable_origin(config: FeedConfig) -> None:
     )
 
     with (
-        patch("agentgraph_feed_connector.load_feed_config", return_value=config),
-        patch("agentgraph_feed_connector.httpx.AsyncClient", _Client),
+        patch("agentgraph_connector_feed.load_feed_config", return_value=config),
+        patch("agentgraph_connector_feed.httpx.AsyncClient", _Client),
     ):
         await AgentGraphFeedConnector().publish_mutation(event)
 
@@ -101,10 +101,10 @@ async def test_first_poll_starts_at_feed_tail(
 ) -> None:
     _Client.responses = {"https://feed.example.test/events/tail": {"cursor": 42}}
 
-    caplog.set_level(logging.INFO, logger="agentgraph_feed_connector")
+    caplog.set_level(logging.INFO, logger="agentgraph_connector_feed")
     with (
-        patch("agentgraph_feed_connector.load_feed_config", return_value=config),
-        patch("agentgraph_feed_connector.httpx.AsyncClient", _Client),
+        patch("agentgraph_connector_feed.load_feed_config", return_value=config),
+        patch("agentgraph_connector_feed.httpx.AsyncClient", _Client),
     ):
         batch, cursor = await AgentGraphFeedConnector().poll({})
 
@@ -134,7 +134,7 @@ async def test_remote_observation_reuses_server_handler(config: FeedConfig) -> N
     }
 
     with patch(
-        "agentgraph_feed_connector.record_observation",
+        "agentgraph_connector_feed.record_observation",
         new=AsyncMock(return_value={"status": "accepted"}),
     ) as record:
         await _apply_event(event, config)
@@ -160,7 +160,7 @@ async def test_self_observation_is_not_applied(config: FeedConfig) -> None:
     }
 
     with patch(
-        "agentgraph_feed_connector.record_observation", new=AsyncMock()
+        "agentgraph_connector_feed.record_observation", new=AsyncMock()
     ) as record:
         await _apply_event(event, config)
 
@@ -184,7 +184,7 @@ async def test_own_bookmark_is_replayed_for_feed_order(config: FeedConfig) -> No
     }
 
     with patch(
-        "agentgraph_feed_connector._apply_bookmark", new=AsyncMock()
+        "agentgraph_connector_feed._apply_bookmark", new=AsyncMock()
     ) as apply_bookmark:
         await _apply_event(event, config)
 

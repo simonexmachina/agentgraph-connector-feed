@@ -1,6 +1,6 @@
 [project]
 name = "agentgraph-connector-feed"
-version = "0.1.0"
+version = "0.1.1"
 description = "Shared mutation feed connector for AgentGraph"
 readme = "README.md"
 license = "MIT"
@@ -16,7 +16,7 @@ Repository = "https://github.com/simonexmachina/agentgraph-connector-feed"
 Issues = "https://github.com/simonexmachina/agentgraph-connector-feed/issues"
 
 [project.entry-points."agentgraph.connectors"]
-feed = "agentgraph_feed_connector:AgentGraphFeedConnector"
+feed = "agentgraph_connector_feed:AgentGraphFeedConnector"
 
 [tool.uv]
 package = true
@@ -26,7 +26,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["agentgraph_feed_connector*"]
+include = ["agentgraph_connector_feed*"]
 
 [dependency-groups]
 dev = [
@@ -48,4 +48,4 @@ target-version = "py312"
 select = ["E", "W", "F", "I", "UP", "B", "SIM", "BLE", "RUF", "PYI"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["agentgraph_feed_connector"]
+known-first-party = ["agentgraph_connector_feed"]

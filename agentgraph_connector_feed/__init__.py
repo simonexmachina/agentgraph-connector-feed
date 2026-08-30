@@ -19,7 +19,7 @@ from agentgraph.graph.bookmark import bookmark_url, set_entity_bookmark
 from agentgraph.graph.delete import delete_platform_entity
 from agentgraph.server.observation import record_observation
 
-from agentgraph_feed_connector.config import (
+from agentgraph_connector_feed.config import (
     FeedConfig,
     load_feed_config,
     save_feed_config,
