@@ -1,7 +1,7 @@
-# AgentGraph Feed Connector
+# AgentGraph Feed
 
-The AgentGraph Feed Connector shares local observations, bookmark changes, and explicit
-deletions through a separately deployed AgentGraph feed server.
+The AgentGraph Feed package provides both the AgentGraph connector and the shared HTTP
+server used to exchange observations, bookmark changes, and explicit deletions.
 
 ## Installation
 
@@ -30,8 +30,20 @@ The connector publishes new local observations, bookmark changes, and explicit d
 best-effort HTTP requests. It polls the feed once per minute. Its first poll starts at the current
 feed tail, so existing events are not imported.
 
-The server must expose `POST /events`, `GET /events`, and `GET /events/tail`. The connector and
-server communicate only through this HTTP API; the server is deployed and maintained separately.
+## Server
+
+Run the feed server locally with:
+
+```sh
+agentgraph-feed-server
+```
+
+The server listens on port `8767` by default. Set `AGENTGRAPH_FEED_SERVER_PORT` to use
+another port. The event database defaults to
+`~/.agentgraph/agentgraph-feed-events.db`; set `AGENTGRAPH_FEED_DB` to override it.
+
+The server exposes `GET /healthcheck`, `POST /events`, `GET /events`, and
+`GET /events/tail`. The connector and server communicate only through this HTTP API.
 
 ## Security
 

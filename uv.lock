@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -9,11 +9,14 @@ resolution-markers = [
 
 [[package]]
 name = "agentgraph-connector-feed"
-version = "0.1.1"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "agentgraph-server" },
+    { name = "fastapi" },
     { name = "httpx" },
+    { name = "python-dotenv" },
+    { name = "uvicorn" },
 ]
 
 [package.dev-dependencies]
@@ -27,7 +30,10 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "agentgraph-server", specifier = ">=0.6.1,<0.7" },
+    { name = "fastapi", specifier = ">=0.115,<1.0" },
     { name = "httpx", specifier = ">=0.28,<1.0" },
+    { name = "python-dotenv", specifier = ">=1.0,<2.0" },
+    { name = "uvicorn", specifier = ">=0.30,<1.0" },
 ]
 
 [package.metadata.requires-dev]
