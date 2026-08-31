@@ -55,7 +55,7 @@ class AgentGraphFeedConnector(FeedConnector):
         return EntityBatch()
 
     async def publish_mutation(self, event: MutationEvent) -> None:
-        if event.kind == "update":
+        if event.kind == "upsert":
             return
         config = load_feed_config()
         if config is None:
@@ -133,8 +133,6 @@ class AgentGraphFeedConnector(FeedConnector):
 
 async def _apply_event(event: dict[str, Any], config: FeedConfig) -> None:
     kind = event.get("kind")
-    if kind == "update":
-        return
     event_id = str(event["event_id"])
     origin_id = UUID(str(event["origin_id"]))
     target = cast(dict[str, Any], event["target"])

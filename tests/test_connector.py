@@ -97,8 +97,8 @@ async def test_publish_adds_stable_origin(config: FeedConfig) -> None:
 
 
 @pytest.mark.asyncio
-async def test_publish_ignores_update_mutation() -> None:
-    event = cast(MutationEvent, SimpleNamespace(kind="update"))
+async def test_publish_ignores_upsert_mutation() -> None:
+    event = cast(MutationEvent, SimpleNamespace(kind="upsert"))
 
     with patch("agentgraph_connector_feed.load_feed_config") as load_config:
         await AgentGraphFeedConnector().publish_mutation(event)
@@ -122,27 +122,6 @@ async def test_first_poll_starts_at_feed_tail(
     assert batch.entities == []
     assert cursor == {"last_event_id": 42}
     assert "Polling feed server at https://feed.example.test" in caplog.messages
-
-
-@pytest.mark.asyncio
-async def test_poll_ignores_update_event_and_advances_cursor(
-    config: FeedConfig,
-) -> None:
-    _Client.responses = {
-        "https://feed.example.test/events": {
-            "events": [{"sequence": 43, "kind": "update"}],
-            "next_cursor": 43,
-        }
-    }
-
-    with (
-        patch("agentgraph_connector_feed.load_feed_config", return_value=config),
-        patch("agentgraph_connector_feed.httpx.AsyncClient", _Client),
-    ):
-        batch, cursor = await AgentGraphFeedConnector().poll({"last_event_id": 42})
-
-    assert batch.entities == []
-    assert cursor == {"last_event_id": 43}
 
 
 @pytest.mark.asyncio
