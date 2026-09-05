@@ -1,7 +1,7 @@
 # AgentGraph Feed
 
 The AgentGraph Feed package provides both the AgentGraph connector and the shared HTTP
-server used to exchange observations, bookmark changes, and explicit deletions.
+server used to exchange graph mutation events.
 
 ## Installation
 
@@ -30,20 +30,26 @@ The connector publishes new local observations, bookmark changes, and explicit d
 best-effort HTTP requests. It polls the feed once per minute. Its first poll starts at the current
 feed tail, so existing events are not imported.
 
+Entity upserts are ignored by default. Pass `--publish-upserts` to publish full committed entity
+and edge snapshots.
+
 ## Server
 
 Run the feed server locally with:
 
 ```sh
-agentgraph-feed-server
+uv run agentgraph-feed-server
 ```
 
 The server listens on port `8767` by default. Set `AGENTGRAPH_FEED_SERVER_PORT` to use
 another port. The event database defaults to
-`~/.agentgraph/agentgraph-feed-events.db`; set `AGENTGRAPH_FEED_DB` to override it.
+`<AGENTGRAPH_CONFIG_DIR>/agentgraph-feed-events.db`, where the config directory defaults to
+`~/.agentgraph`. Set `AGENTGRAPH_FEED_DB` to override the complete database path.
 
-The server exposes `GET /healthcheck`, `POST /events`, `GET /events`, and
-`GET /events/tail`. The connector and server communicate only through this HTTP API.
+The server exposes `GET /healthcheck`, `POST /events`, `GET /events`, `GET /events/tail`, and
+`DELETE /events?through=<sequence>`. The delete endpoint purges only events at or before the
+supplied sequence, preserving events appended while a consumer processes its current page. It is
+intended for clients using the server as a one-producer, one-consumer queue.
 
 ## Security
 

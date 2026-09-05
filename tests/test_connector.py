@@ -61,7 +61,10 @@ def config() -> FeedConfig:
 
 def test_config_round_trip(tmp_path: Path) -> None:
     path = tmp_path / "feed.toml"
-    config = FeedConfig.create("https://feed.example.test/")
+    config = FeedConfig.create(
+        "https://feed.example.test/",
+        publish_upserts=True,
+    )
 
     with patch("agentgraph_connector_feed.config.feed_config_path", return_value=path):
         save_feed_config(config)
@@ -69,6 +72,43 @@ def test_config_round_trip(tmp_path: Path) -> None:
 
     assert loaded == config
     assert loaded is not None and loaded.feed_url == "https://feed.example.test"
+
+
+def test_config_defaults_to_ignoring_upserts(tmp_path: Path) -> None:
+    path = tmp_path / "feed.toml"
+    path.write_text(
+        'feed_url = "https://feed.example.test"\n'
+        'origin_id = "00000000-0000-0000-0000-000000000001"\n'
+    )
+
+    with patch("agentgraph_connector_feed.config.feed_config_path", return_value=path):
+        loaded = load_feed_config()
+
+    assert loaded is not None
+    assert loaded.publish_upserts is False
+
+
+def test_configure_cli_enables_upsert_delivery() -> None:
+    origin_id = UUID("00000000-0000-0000-0000-000000000002")
+
+    with patch("agentgraph_connector_feed.save_feed_config") as save_config:
+        result = AgentGraphFeedConnector.run_cli_command(
+            [
+                "configure",
+                "https://feed.example.test/",
+                "--origin-id",
+                str(origin_id),
+                "--publish-upserts",
+            ]
+        )
+
+    saved = save_config.call_args.args[0]
+    assert saved == FeedConfig(
+        feed_url="https://feed.example.test",
+        origin_id=origin_id,
+        publish_upserts=True,
+    )
+    assert result["publish_upserts"] is True
 
 
 @pytest.mark.asyncio
@@ -100,10 +140,51 @@ async def test_publish_adds_stable_origin(config: FeedConfig) -> None:
 async def test_publish_ignores_upsert_mutation() -> None:
     event = cast(MutationEvent, SimpleNamespace(kind="upsert"))
 
-    with patch("agentgraph_connector_feed.load_feed_config") as load_config:
+    with (
+        patch(
+            "agentgraph_connector_feed.load_feed_config",
+            return_value=FeedConfig(
+                feed_url="https://feed.example.test",
+                origin_id=UUID("00000000-0000-0000-0000-000000000001"),
+            ),
+        ),
+        patch("agentgraph_connector_feed.httpx.AsyncClient", _Client),
+    ):
+        _Client.posts = []
         await AgentGraphFeedConnector().publish_mutation(event)
 
-    load_config.assert_not_called()
+    assert _Client.posts == []
+
+
+@pytest.mark.asyncio
+async def test_publish_sends_upsert_when_enabled(config: FeedConfig) -> None:
+    config.publish_upserts = True
+    event = cast(
+        MutationEvent,
+        SimpleNamespace(
+            kind="upsert",
+            model_dump=lambda **_: {"kind": "upsert", "entity": {}, "edges": []},
+        ),
+    )
+
+    with (
+        patch("agentgraph_connector_feed.load_feed_config", return_value=config),
+        patch("agentgraph_connector_feed.httpx.AsyncClient", _Client),
+    ):
+        _Client.posts = []
+        await AgentGraphFeedConnector().publish_mutation(event)
+
+    assert _Client.posts == [
+        (
+            "https://feed.example.test/events",
+            {
+                "kind": "upsert",
+                "entity": {},
+                "edges": [],
+                "origin_id": str(config.origin_id),
+            },
+        )
+    ]
 
 
 @pytest.mark.asyncio

@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
+from agentgraph.config import get_config_paths
 from dotenv import dotenv_values
 from fastapi import FastAPI, Query
 from pydantic import BaseModel, Field, model_validator
 
-app = FastAPI(title="AgentGraph Feed")
-DEFAULT_DB_PATH = Path.home() / ".agentgraph" / "agentgraph-feed-events.db"
+DB_FILENAME = "agentgraph-feed-events.db"
+logger = logging.getLogger("uvicorn.error")
 
 
 def _database_path() -> str:
@@ -23,10 +27,19 @@ def _database_path() -> str:
     if not configured_path:
         dotenv_value = dotenv_values(".env").get("AGENTGRAPH_FEED_DB")
         configured_path = dotenv_value if isinstance(dotenv_value, str) else None
-    return configured_path or str(DEFAULT_DB_PATH)
+    return configured_path or str(get_config_paths()[0] / DB_FILENAME)
 
 
 DB = _database_path()
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    logger.info("AgentGraph Feed database: %s", Path(DB).expanduser().resolve())
+    yield
+
+
+app = FastAPI(title="AgentGraph Feed", lifespan=lifespan)
 
 ResourceType = Literal[
     "channel",
@@ -77,8 +90,45 @@ class TombstoneEvent(FeedEventBase):
     kind: Literal["tombstone"]
 
 
+class EntitySnapshot(BaseModel):
+    id: str
+    entity_type: str
+    platform: str
+    platform_entity_id: str
+    title: str | None = None
+    content: str | None = None
+    metadata: dict[str, Any]
+    created_at: str
+    updated_at: str
+    source_created_at: str | None = None
+    source_updated_at: str | None = None
+    synced_at: str | None = None
+    observed_at: str | None = None
+    retention_policy: str
+    retention_parent_id: str | None = None
+    cumulative_observation_duration_ms: int
+    bookmarked: bool
+
+
+class EdgeSnapshot(BaseModel):
+    id: str
+    edge_type: str
+    platform: str
+    properties: dict[str, Any]
+    source_entity_id: str
+    target_entity_id: str
+    source_ref: str
+    target_ref: str
+
+
+class UpsertEvent(FeedEventBase):
+    kind: Literal["upsert"]
+    entity: EntitySnapshot
+    edges: list[EdgeSnapshot]
+
+
 FeedEvent = Annotated[
-    ObservationEvent | BookmarkEvent | TombstoneEvent,
+    ObservationEvent | BookmarkEvent | TombstoneEvent | UpsertEvent,
     Field(discriminator="kind"),
 ]
 
@@ -155,6 +205,13 @@ def poll(
     ]
     next_cursor = int(rows[-1]["id"]) if rows else since
     return {"events": events, "next_cursor": next_cursor}
+
+
+@app.delete("/events")
+def purge(through: int = Query(ge=0)) -> dict[str, int]:
+    with get_db() as conn:
+        cursor = conn.execute("DELETE FROM feed_events WHERE id <= ?", (through,))
+    return {"deleted": max(cursor.rowcount, 0)}
 
 
 @app.get("/events/tail")

@@ -1,4 +1,4 @@
-"""AgentGraph connector for a shared observation and bookmark feed."""
+"""AgentGraph connector for a shared mutation feed."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ class AgentGraphFeedConnector(FeedConnector):
     poll_interval: ClassVar[timedelta | None] = timedelta(minutes=1)
     appears_in_auth_status: ClassVar[bool] = False
     auth_description: ClassVar[str | None] = (
-        "Shares local observations and bookmarks through an AgentGraph feed server."
+        "Shares local graph mutations through an AgentGraph feed server."
     )
 
     def can_handle(self, url: str) -> bool:
@@ -55,10 +55,8 @@ class AgentGraphFeedConnector(FeedConnector):
         return EntityBatch()
 
     async def publish_mutation(self, event: MutationEvent) -> None:
-        if event.kind == "upsert":
-            return
         config = load_feed_config()
-        if config is None:
+        if config is None or (event.kind == "upsert" and not config.publish_upserts):
             return
         payload = event.model_dump(mode="json")
         payload["origin_id"] = str(config.origin_id)
@@ -109,6 +107,7 @@ class AgentGraphFeedConnector(FeedConnector):
                 "configured": config is not None,
                 "feed_url": config.feed_url if config else None,
                 "origin_id": str(config.origin_id) if config else None,
+                "publish_upserts": config.publish_upserts if config else None,
             }
         if args[0] != "configure":
             raise ValueError(
@@ -120,19 +119,22 @@ class AgentGraphFeedConnector(FeedConnector):
             "configured": True,
             "feed_url": config.feed_url,
             "origin_id": str(config.origin_id),
+            "publish_upserts": config.publish_upserts,
         }
 
     @classmethod
     def cli_help(cls) -> str:
         return (
             "Usage: agentgraph connector feed configure <feed-url> "
-            "[--origin-id <uuid>]\n"
+            "[--origin-id <uuid>] [--publish-upserts]\n"
             "   or: agentgraph connector feed status"
         )
 
 
 async def _apply_event(event: dict[str, Any], config: FeedConfig) -> None:
     kind = event.get("kind")
+    if kind == "upsert":
+        return
     event_id = str(event["event_id"])
     origin_id = UUID(str(event["origin_id"]))
     target = cast(dict[str, Any], event["target"])
@@ -211,13 +213,22 @@ def _parse_configure_args(args: list[str]) -> FeedConfig:
         raise ValueError(AgentGraphFeedConnector.cli_help())
     feed_url = args[0]
     origin_id: UUID | None = None
+    publish_upserts = False
     index = 1
     while index < len(args):
+        if args[index] == "--publish-upserts":
+            publish_upserts = True
+            index += 1
+            continue
         if args[index] != "--origin-id" or index + 1 >= len(args):
             raise ValueError(AgentGraphFeedConnector.cli_help())
         origin_id = UUID(args[index + 1])
         index += 2
-    return FeedConfig.create(feed_url=feed_url, origin_id=origin_id)
+    return FeedConfig.create(
+        feed_url=feed_url,
+        origin_id=origin_id,
+        publish_upserts=publish_upserts,
+    )
 
 
 __all__ = ["AgentGraphFeedConnector"]
