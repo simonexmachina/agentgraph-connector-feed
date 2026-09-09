@@ -1,12 +1,12 @@
 [project]
 name = "agentgraph-connector-feed"
-version = "0.2.0"
+version = "0.3.0"
 description = "Shared mutation feed connector and server for AgentGraph"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
-    "agentgraph-server>=0.6.1,<0.7",
+    "agentgraph-server>=0.7.0,<0.8",
     "fastapi>=0.115,<1.0",
     "httpx>=0.28,<1.0",
     "python-dotenv>=1.0,<2.0",
