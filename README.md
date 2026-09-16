@@ -12,7 +12,8 @@ uv pip install agentgraph-connector-feed
 ```
 
 The `0.1.x` and `0.2.x` connector releases support `agentgraph-server>=0.6.1,<0.7`. The `0.3.x`
-releases require `agentgraph-server>=0.7.0,<0.8`.
+releases require `agentgraph-server>=0.7.0,<0.8`. The `0.4.x` releases require
+`agentgraph-server>=0.8,<0.9`.
 
 ## Configuration
 
