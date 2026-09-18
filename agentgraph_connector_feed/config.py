@@ -16,6 +16,8 @@ class FeedConfig(BaseModel):
     feed_url: str
     origin_id: UUID
     publish_upserts: bool = False
+    enabled: bool = True
+    enable_id: UUID | None = None
 
     @classmethod
     def create(
@@ -24,6 +26,8 @@ class FeedConfig(BaseModel):
         origin_id: UUID | None = None,
         *,
         publish_upserts: bool = False,
+        enabled: bool = True,
+        enable_id: UUID | None = None,
     ) -> FeedConfig:
         normalised_url = feed_url.rstrip("/")
         parsed = urlparse(normalised_url)
@@ -33,6 +37,8 @@ class FeedConfig(BaseModel):
             feed_url=normalised_url,
             origin_id=origin_id or uuid4(),
             publish_upserts=publish_upserts,
+            enabled=enabled,
+            enable_id=enable_id,
         )
 
 
@@ -55,5 +61,8 @@ def save_feed_config(config: FeedConfig) -> None:
         f"feed_url = {json.dumps(config.feed_url)}\n"
         f"origin_id = {json.dumps(str(config.origin_id))}\n"
         f"publish_upserts = {str(config.publish_upserts).lower()}\n"
+        f"enabled = {str(config.enabled).lower()}\n"
     )
+    if config.enable_id is not None:
+        content += f"enable_id = {json.dumps(str(config.enable_id))}\n"
     path.write_text(content)

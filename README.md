@@ -12,17 +12,30 @@ uv pip install agentgraph-connector-feed
 ```
 
 The `0.1.x` and `0.2.x` connector releases support `agentgraph-server>=0.6.1,<0.7`. The `0.3.x`
-releases require `agentgraph-server>=0.7.0,<0.8`. The `0.4.x` releases require
-`agentgraph-server>=0.8,<0.9`.
+releases require `agentgraph-server>=0.7.0,<0.8`. The `0.4.x` and `0.5.x` releases require
+`agentgraph-server>=0.8,<0.9`. The `0.5.0` release replaces
+`agentgraph connector feed configure` with `enable` and `disable`.
 
 ## Configuration
 
-Configure the feed server base URL, then inspect the saved configuration:
+Enable the connector with the feed server base URL, then inspect the saved configuration:
 
 ```sh
-agentgraph connector feed configure http://localhost:8767
+agentgraph connector feed enable http://localhost:8767
 agentgraph connector feed status
 ```
+
+Turn the feed off with `disable`, which keeps the saved URL, origin ID, and upsert setting so
+`enable` needs no arguments to turn it back on:
+
+```sh
+agentgraph connector feed disable
+agentgraph connector feed enable
+```
+
+A plain `enable` restarts at the current feed tail, so events published while the feed was
+disabled are not imported. Pass `agentgraph connector feed enable --resume` to continue from
+the cursor the connector had when it was disabled.
 
 The configured URL must not include `/events` or `/events-feed`. The connector adds `/events`
 and `/events/tail` when it publishes and polls respectively. For a deployed server behind a
@@ -33,7 +46,8 @@ best-effort HTTP requests. It polls the feed once per minute. Its first poll sta
 feed tail, so existing events are not imported.
 
 Entity upserts are ignored by default. Pass `--publish-upserts` to publish full committed entity
-and edge snapshots.
+and edge snapshots. Later `enable` runs inherit the stored setting; pass `--no-publish-upserts`
+to turn upsert delivery back off.
 
 ## Server
 

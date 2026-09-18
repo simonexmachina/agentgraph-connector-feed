@@ -1,6 +1,6 @@
 [project]
 name = "agentgraph-connector-feed"
-version = "0.4.0"
+version = "0.5.0"
 description = "Shared mutation feed connector and server for AgentGraph"
 readme = "README.md"
 license = "MIT"

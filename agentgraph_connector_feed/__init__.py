@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 from typing import Any, ClassVar, cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 from agentgraph.connectors.base import EntityBatch, FetchPolicy, ResourceType
@@ -56,7 +56,9 @@ class AgentGraphFeedConnector(FeedConnector):
 
     async def publish_mutation(self, event: MutationEvent) -> None:
         config = load_feed_config()
-        if config is None or (event.kind == "upsert" and not config.publish_upserts):
+        if config is None or not config.enabled:
+            return
+        if event.kind == "upsert" and not config.publish_upserts:
             return
         payload = event.model_dump(mode="json")
         payload["origin_id"] = str(config.origin_id)
@@ -71,16 +73,21 @@ class AgentGraphFeedConnector(FeedConnector):
     ) -> tuple[EntityBatch, dict[str, Any]]:
         _ = account_id
         config = load_feed_config()
-        if config is None:
+        if config is None or not config.enabled:
             return EntityBatch(), cursor
 
+        stamp = _enable_stamp(config.enable_id)
+        restarted = _enable_stamp(cursor.get("enable_id")) != stamp
         logger.info("Polling feed server at %s", config.feed_url)
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT, trust_env=False) as client:
-            if "last_event_id" not in cursor:
+            if "last_event_id" not in cursor or restarted:
                 response = await client.get(f"{config.feed_url}/events/tail")
                 response.raise_for_status()
                 tail_payload = cast(dict[str, Any], response.json())
-                return EntityBatch(), {"last_event_id": int(tail_payload["cursor"])}
+                return EntityBatch(), {
+                    "last_event_id": int(tail_payload["cursor"]),
+                    "enable_id": stamp,
+                }
 
             since = int(cursor["last_event_id"])
             response = await client.get(
@@ -95,7 +102,7 @@ class AgentGraphFeedConnector(FeedConnector):
             for event in events:
                 await _apply_event(event, config)
                 next_cursor = int(event["sequence"])
-            return EntityBatch(), {"last_event_id": next_cursor}
+            return EntityBatch(), {"last_event_id": next_cursor, "enable_id": stamp}
 
     @classmethod
     def run_cli_command(cls, args: list[str]) -> dict[str, Any]:
@@ -105,29 +112,39 @@ class AgentGraphFeedConnector(FeedConnector):
             config = load_feed_config()
             return {
                 "configured": config is not None,
+                "enabled": config.enabled if config else False,
                 "feed_url": config.feed_url if config else None,
                 "origin_id": str(config.origin_id) if config else None,
                 "publish_upserts": config.publish_upserts if config else None,
             }
-        if args[0] != "configure":
-            raise ValueError(
-                f"Unknown feed connector command {args[0]!r}\n{cls.cli_help()}"
-            )
-        config = _parse_configure_args(args[1:])
-        save_feed_config(config)
-        return {
-            "configured": True,
-            "feed_url": config.feed_url,
-            "origin_id": str(config.origin_id),
-            "publish_upserts": config.publish_upserts,
-        }
+        if args[0] == "enable":
+            config = _parse_enable_args(args[1:], load_feed_config())
+            save_feed_config(config)
+            return _config_summary(config)
+        if args[0] == "disable":
+            existing = load_feed_config()
+            if existing is None:
+                return {"configured": False, "enabled": False}
+            config = existing.model_copy(update={"enabled": False})
+            save_feed_config(config)
+            return _config_summary(config)
+        raise ValueError(
+            f"Unknown feed connector command {args[0]!r}\n{cls.cli_help()}"
+        )
 
     @classmethod
     def cli_help(cls) -> str:
         return (
-            "Usage: agentgraph connector feed configure <feed-url> "
-            "[--origin-id <uuid>] [--publish-upserts]\n"
-            "   or: agentgraph connector feed status"
+            "Usage: agentgraph connector feed enable [<feed-url>] "
+            "[--origin-id <uuid>] [--publish-upserts] [--no-publish-upserts] "
+            "[--resume]\n"
+            "   or: agentgraph connector feed disable\n"
+            "   or: agentgraph connector feed status\n"
+            "\n"
+            "enable without a feed URL turns a previously configured feed back on, "
+            "reusing its URL, origin ID, and upsert setting. It restarts at the "
+            "current feed tail, so events published while the feed was disabled are "
+            "not imported; pass --resume to continue from the previous cursor."
         )
 
 
@@ -208,26 +225,72 @@ async def _apply_bookmark(
     await set_entity_bookmark(entity_id, bookmarked)
 
 
-def _parse_configure_args(args: list[str]) -> FeedConfig:
-    if not args:
-        raise ValueError(AgentGraphFeedConnector.cli_help())
-    feed_url = args[0]
+def _enable_stamp(value: object) -> str:
+    """Normalise an enable token so a stamp-less config and cursor compare equal."""
+    return "" if value is None else str(value)
+
+
+def _config_summary(config: FeedConfig) -> dict[str, Any]:
+    return {
+        "configured": True,
+        "enabled": config.enabled,
+        "feed_url": config.feed_url,
+        "origin_id": str(config.origin_id),
+        "publish_upserts": config.publish_upserts,
+    }
+
+
+def _parse_enable_args(args: list[str], existing: FeedConfig | None) -> FeedConfig:
+    feed_url: str | None = None
     origin_id: UUID | None = None
-    publish_upserts = False
-    index = 1
+    publish_upserts: bool | None = None
+    resume = False
+    index = 0
     while index < len(args):
-        if args[index] == "--publish-upserts":
+        arg = args[index]
+        if arg == "--publish-upserts":
             publish_upserts = True
             index += 1
             continue
-        if args[index] != "--origin-id" or index + 1 >= len(args):
+        if arg == "--no-publish-upserts":
+            publish_upserts = False
+            index += 1
+            continue
+        if arg == "--resume":
+            resume = True
+            index += 1
+            continue
+        if arg == "--origin-id":
+            if index + 1 >= len(args):
+                raise ValueError(AgentGraphFeedConnector.cli_help())
+            origin_id = UUID(args[index + 1])
+            index += 2
+            continue
+        if arg.startswith("-") or feed_url is not None:
             raise ValueError(AgentGraphFeedConnector.cli_help())
-        origin_id = UUID(args[index + 1])
-        index += 2
+        feed_url = arg
+        index += 1
+
+    if feed_url is None:
+        if existing is None:
+            raise ValueError(AgentGraphFeedConnector.cli_help())
+        feed_url = existing.feed_url
+    if origin_id is None and existing is not None:
+        # Reusing the stored origin ID keeps _apply_event dropping our own events.
+        origin_id = existing.origin_id
+    if publish_upserts is None:
+        publish_upserts = existing.publish_upserts if existing is not None else False
+    if resume:
+        enable_id = existing.enable_id if existing is not None else None
+    else:
+        enable_id = uuid4()
+
     return FeedConfig.create(
         feed_url=feed_url,
         origin_id=origin_id,
         publish_upserts=publish_upserts,
+        enabled=True,
+        enable_id=enable_id,
     )
 
 

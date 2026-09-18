@@ -88,13 +88,16 @@ def test_config_defaults_to_ignoring_upserts(tmp_path: Path) -> None:
     assert loaded.publish_upserts is False
 
 
-def test_configure_cli_enables_upsert_delivery() -> None:
+def test_enable_cli_enables_upsert_delivery() -> None:
     origin_id = UUID("00000000-0000-0000-0000-000000000002")
 
-    with patch("agentgraph_connector_feed.save_feed_config") as save_config:
+    with (
+        patch("agentgraph_connector_feed.load_feed_config", return_value=None),
+        patch("agentgraph_connector_feed.save_feed_config") as save_config,
+    ):
         result = AgentGraphFeedConnector.run_cli_command(
             [
-                "configure",
+                "enable",
                 "https://feed.example.test/",
                 "--origin-id",
                 str(origin_id),
@@ -102,13 +105,98 @@ def test_configure_cli_enables_upsert_delivery() -> None:
             ]
         )
 
-    saved = save_config.call_args.args[0]
-    assert saved == FeedConfig(
-        feed_url="https://feed.example.test",
-        origin_id=origin_id,
-        publish_upserts=True,
-    )
+    saved = cast(FeedConfig, save_config.call_args.args[0])
+    assert saved.feed_url == "https://feed.example.test"
+    assert saved.origin_id == origin_id
+    assert saved.publish_upserts is True
+    assert saved.enabled is True
+    assert saved.enable_id is not None
     assert result["publish_upserts"] is True
+    assert result["enabled"] is True
+
+
+def test_enable_without_arguments_reuses_stored_config(config: FeedConfig) -> None:
+    config.publish_upserts = True
+    config.enabled = False
+
+    with (
+        patch("agentgraph_connector_feed.load_feed_config", return_value=config),
+        patch("agentgraph_connector_feed.save_feed_config") as save_config,
+    ):
+        result = AgentGraphFeedConnector.run_cli_command(["enable"])
+
+    saved = cast(FeedConfig, save_config.call_args.args[0])
+    assert saved.feed_url == config.feed_url
+    assert saved.origin_id == config.origin_id
+    assert saved.publish_upserts is True
+    assert saved.enabled is True
+    assert result == {
+        "configured": True,
+        "enabled": True,
+        "feed_url": config.feed_url,
+        "origin_id": str(config.origin_id),
+        "publish_upserts": True,
+    }
+
+
+def test_enable_without_arguments_or_config_is_rejected() -> None:
+    with (
+        patch("agentgraph_connector_feed.load_feed_config", return_value=None),
+        patch("agentgraph_connector_feed.save_feed_config") as save_config,
+        pytest.raises(ValueError, match="Usage: agentgraph connector feed enable"),
+    ):
+        AgentGraphFeedConnector.run_cli_command(["enable"])
+
+    save_config.assert_not_called()
+
+
+def test_enable_can_turn_upsert_delivery_back_off(config: FeedConfig) -> None:
+    config.publish_upserts = True
+
+    with (
+        patch("agentgraph_connector_feed.load_feed_config", return_value=config),
+        patch("agentgraph_connector_feed.save_feed_config") as save_config,
+    ):
+        AgentGraphFeedConnector.run_cli_command(["enable", "--no-publish-upserts"])
+
+    saved = cast(FeedConfig, save_config.call_args.args[0])
+    assert saved.publish_upserts is False
+
+
+def test_configure_is_no_longer_a_command() -> None:
+    with pytest.raises(ValueError, match="Unknown feed connector command 'configure'"):
+        AgentGraphFeedConnector.run_cli_command(
+            ["configure", "https://feed.example.test"]
+        )
+
+
+def test_disable_preserves_the_configuration(tmp_path: Path) -> None:
+    path = tmp_path / "feed.toml"
+    enabled = FeedConfig.create(
+        "https://feed.example.test",
+        UUID("00000000-0000-0000-0000-000000000002"),
+        publish_upserts=True,
+        enable_id=UUID("00000000-0000-0000-0000-0000000000aa"),
+    )
+
+    with patch("agentgraph_connector_feed.config.feed_config_path", return_value=path):
+        save_feed_config(enabled)
+        result = AgentGraphFeedConnector.run_cli_command(["disable"])
+        loaded = load_feed_config()
+
+    assert result["enabled"] is False
+    assert loaded == enabled.model_copy(update={"enabled": False})
+
+
+def test_disable_without_a_configuration_is_idempotent() -> None:
+    with (
+        patch("agentgraph_connector_feed.load_feed_config", return_value=None),
+        patch("agentgraph_connector_feed.save_feed_config") as save_config,
+    ):
+        result = AgentGraphFeedConnector.run_cli_command(["disable"])
+
+    save_config.assert_not_called()
+    assert result == {"configured": False, "enabled": False}
 
 
 @pytest.mark.asyncio
@@ -201,8 +289,113 @@ async def test_first_poll_starts_at_feed_tail(
         batch, cursor = await AgentGraphFeedConnector().poll({})
 
     assert batch.entities == []
-    assert cursor == {"last_event_id": 42}
+    assert cursor == {"last_event_id": 42, "enable_id": ""}
     assert "Polling feed server at https://feed.example.test" in caplog.messages
+
+
+@pytest.mark.asyncio
+async def test_publish_is_inert_while_disabled(config: FeedConfig) -> None:
+    config.enabled = False
+    event = BookmarkMutation(
+        target=MutationTarget(
+            platform="web",
+            platform_entity_id="https://example.com",
+            entity_type="Document",
+            resource_type="document",
+            url="https://example.com",
+        ),
+        bookmarked=True,
+    )
+
+    with (
+        patch("agentgraph_connector_feed.load_feed_config", return_value=config),
+        patch("agentgraph_connector_feed.httpx.AsyncClient", _Client),
+    ):
+        _Client.posts = []
+        await AgentGraphFeedConnector().publish_mutation(event)
+
+    assert _Client.posts == []
+
+
+@pytest.mark.asyncio
+async def test_poll_is_inert_while_disabled(config: FeedConfig) -> None:
+    config.enabled = False
+    _Client.responses = {}
+
+    with (
+        patch("agentgraph_connector_feed.load_feed_config", return_value=config),
+        patch("agentgraph_connector_feed.httpx.AsyncClient", _Client),
+    ):
+        batch, cursor = await AgentGraphFeedConnector().poll({"last_event_id": 12})
+
+    assert batch.entities == []
+    assert cursor == {"last_event_id": 12}
+
+
+@pytest.mark.asyncio
+async def test_plain_enable_restarts_at_the_feed_tail(config: FeedConfig) -> None:
+    config.enable_id = UUID("00000000-0000-0000-0000-0000000000aa")
+    stale_cursor = {"last_event_id": 12, "enable_id": str(config.enable_id)}
+    _Client.responses = {"https://feed.example.test/events/tail": {"cursor": 42}}
+
+    with (
+        patch("agentgraph_connector_feed.load_feed_config", return_value=config),
+        patch("agentgraph_connector_feed.save_feed_config") as save_config,
+    ):
+        AgentGraphFeedConnector.run_cli_command(["enable"])
+
+    reenabled = cast(FeedConfig, save_config.call_args.args[0])
+    assert reenabled.enable_id != config.enable_id
+
+    with (
+        patch("agentgraph_connector_feed.load_feed_config", return_value=reenabled),
+        patch("agentgraph_connector_feed.httpx.AsyncClient", _Client),
+    ):
+        _, cursor = await AgentGraphFeedConnector().poll(stale_cursor)
+
+    assert cursor == {"last_event_id": 42, "enable_id": str(reenabled.enable_id)}
+
+
+@pytest.mark.asyncio
+async def test_resume_enable_continues_from_the_stored_cursor(
+    config: FeedConfig,
+) -> None:
+    config.enable_id = UUID("00000000-0000-0000-0000-0000000000aa")
+    stored_cursor = {"last_event_id": 12, "enable_id": str(config.enable_id)}
+    _Client.responses = {"https://feed.example.test/events": {"events": []}}
+
+    with (
+        patch("agentgraph_connector_feed.load_feed_config", return_value=config),
+        patch("agentgraph_connector_feed.save_feed_config") as save_config,
+    ):
+        AgentGraphFeedConnector.run_cli_command(["enable", "--resume"])
+
+    resumed = cast(FeedConfig, save_config.call_args.args[0])
+    assert resumed.enable_id == config.enable_id
+
+    with (
+        patch("agentgraph_connector_feed.load_feed_config", return_value=resumed),
+        patch("agentgraph_connector_feed.httpx.AsyncClient", _Client),
+    ):
+        _, cursor = await AgentGraphFeedConnector().poll(stored_cursor)
+
+    assert cursor == stored_cursor
+
+
+@pytest.mark.asyncio
+async def test_legacy_config_and_cursor_resume_without_retailing(
+    config: FeedConfig,
+) -> None:
+    assert config.enable_id is None
+    _Client.responses = {"https://feed.example.test/events": {"events": []}}
+
+    with (
+        patch("agentgraph_connector_feed.load_feed_config", return_value=config),
+        patch("agentgraph_connector_feed.httpx.AsyncClient", _Client),
+    ):
+        _, cursor = await AgentGraphFeedConnector().poll({"last_event_id": 12})
+
+    assert cursor == {"last_event_id": 12, "enable_id": ""}
 
 
 @pytest.mark.asyncio
